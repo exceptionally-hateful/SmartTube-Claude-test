@@ -100,6 +100,11 @@ public class LoungeService {
         PairingCodeV2 pairingCode = response.body();
         String code = pairingCode != null ? pairingCode.getPairingCode() : null;
 
+        if (code == null && response.isSuccessful()) {
+            // HTTP 200 but no JSON code: the reply format may have changed. Look at the raw reply.
+            return ServiceHelper.insertSeparator(readPairingCodeRaw(pairingCodeWrapper), " ", 3);
+        }
+
         if (code == null) {
             String details = "";
             try {
@@ -367,6 +372,34 @@ public class LoungeService {
             mPlaylistIndex = playlistData.getPlaylistIndex() != null ? playlistData.getPlaylistIndex() : mPlaylistIndex;
             mPlaylistId = playlistData.getPlaylistId() != null ? playlistData.getPlaylistId() : mPlaylistId;
         }
+    }
+
+    private String readPairingCodeRaw(Call<PairingCodeV2> call) {
+        String body;
+
+        try {
+            Response raw = new OkHttpClient().newCall(call.clone().request()).execute();
+            body = raw.body() != null ? raw.body().string() : "";
+        } catch (IOException e) {
+            throw new IllegalStateException("get_pairing_code raw: " + e.getMessage());
+        }
+
+        String trimmed = body.trim();
+
+        // JSON like {"code":"..."}
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"code\"\\s*:\\s*\"([^\"]+)\"").matcher(trimmed);
+        if (m.find()) {
+            return m.group(1);
+        }
+
+        // Plain text code
+        if (trimmed.matches("[A-Za-z0-9 \\-]{9,20}")) {
+            return trimmed.replaceAll("[ \\-]", "");
+        }
+
+        String snippet = trimmed.replaceAll("\\s+", " ");
+        snippet = snippet.length() > 120 ? snippet.substring(0, 120) : snippet;
+        throw new IllegalStateException("get_pairing_code HTTP 200, reply: " + (snippet.isEmpty() ? "(empty)" : snippet));
     }
 
     private TokenInfo getTokenInfo() {
